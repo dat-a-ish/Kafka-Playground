@@ -1,0 +1,132 @@
+version: '3.8'
+
+networks:
+  kafka-network:
+    driver: bridge
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.0.1
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - kafka-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.0.1
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_NAMES: PLAINTEXT
+      KAFKA_LISTENER_PORT: 9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    networks:
+      - kafka-network
+
+  kafka-2:
+    image: confluentinc/cp-kafka:7.0.1
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:9093
+      KAFKA_LISTENER_NAMES: PLAINTEXT
+      KAFKA_LISTENER_PORT: 9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9093:9093"
+    depends_on:
+      - zookeeper
+    networks:
+      - kafka-network
+
+  akhq:
+    image: tchiotludo/akhq:latest
+    environment:
+      AKHQ_CONFIGURATION: |
+        akhq:
+          connections:
+            local:
+              properties:
+                bootstrap.servers: "kafka:9092,kafka-2:9093"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - kafka
+    networks:
+      - kafka-network
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.0.1
+    command: >
+      bash -c "
+      kafka-topics --create --topic my_topic --bootstrap-server kafka:9092 --partitions 3 --replication-factor 2 &&
+      kafka-topics --create --topic another_topic --bootstrap-server kafka:9092 --partitions 2 --replication-factor 2 &&
+      echo 'Topics created successfully!'
+      "
+    depends_on:
+      - kafka
+      - kafka-2
+    networks:
+      - kafka-network
+    restart: "no"
+  
+  jupyter:
+    build:
+      context: .
+      dockerfile: jupyter/Dockerfile
+    networks:
+      kafka-network:
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./jupyter/notebooks:/home/jovyan/work
+    command: start-notebook.sh --NotebookApp.token=${JUPYTER_TOKEN}
+
+  # postgres:
+  #   image: postgres:13
+  #   environment:
+  #     POSTGRES_USER: kafka_user
+  #     POSTGRES_PASSWORD: kafka_password
+  #     POSTGRES_DB: kafka_db
+  #   ports:
+  #     - "5432:5432"
+  #   networks:
+  #     - kafka-network
+
+  # kafka-connect:
+  #   image: confluentinc/cp-kafka-connect:7.0.1
+  #   environment:
+  #     CONNECT_BOOTSTRAP_SERVERS: kafka:9092,kafka-2:9093
+  #     CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+  #     CONNECT_GROUP_ID: "kafka-connect-group"
+  #     CONNECT_CONFIG_STORAGE_TOPIC: "kafka-connect-configs"
+  #     CONNECT_OFFSET_STORAGE_TOPIC: "kafka-connect-offsets"
+  #     CONNECT_STATUS_STORAGE_TOPIC: "kafka-connect-statuses"
+  #     CONNECT_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+  #     CONNECT_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+  #     CONNECT_INTERNAL_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+  #     CONNECT_INTERNAL_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+  #     CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+  #     CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+  #     CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+  #     CONNECT_POSTGRES_CONNECTION_URL: jdbc:postgresql://postgres:5432/kafka_db
+  #     CONNECT_POSTGRES_CONNECTION_USER: kafka_user
+  #     CONNECT_POSTGRES_CONNECTION_PASSWORD: kafka_password
+  #     CONNECT_PLUGIN_PATH: "/usr/share/java"
+  #   ports:
+  #     - "8083:8083"
+  #   depends_on:
+  #     - kafka
+  #     - postgres
+  #   networks:
+  #     - kafka-network
